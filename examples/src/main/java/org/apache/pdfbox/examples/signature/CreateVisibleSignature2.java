@@ -258,7 +258,7 @@ public class CreateVisibleSignature2 extends CreateSignatureBase
                 // PDDocument object anymore, with classic java file random access methods.
                 // If you can't remember the offset value from ByteRange because your context has changed,
                 // then open the file with PDFBox, find the field with findExistingSignature() or
-                // PODDocument.getLastSignatureDictionary() and get the ByteRange from there.
+                // PDDocument.getLastSignatureDictionary() and get the ByteRange from there.
                 // Close the file and then write the signature as explained earlier in this comment.
                 if (isLateExternalSigning())
                 {
@@ -501,7 +501,7 @@ public class CreateVisibleSignature2 extends CreateSignatureBase
         boolean externalSig = false;
         for (int i = 0; i < args.length; i++)
         {
-            if (args[i].equals("-tsa"))
+            if ("-tsa".equals(args[i]))
             {
                 i++;
                 if (i >= args.length)
@@ -511,7 +511,7 @@ public class CreateVisibleSignature2 extends CreateSignatureBase
                 }
                 tsaUrl = args[i];
             }
-            if (args[i].equals("-e"))
+            if ("-e".equals(args[i]))
             {
                 externalSig = true;
             }

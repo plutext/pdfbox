@@ -27,8 +27,10 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColor;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationPolyline;
-import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceContentStream;
+import org.apache.pdfbox.pdmodel.PDAppearanceContentStream;
+import static org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine.LE_NONE;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary;
+import org.apache.pdfbox.util.Matrix;
 
 /**
  * Handler to generate the polyline annotations appearance.
@@ -57,7 +59,7 @@ public class PDPolylineAppearanceHandler extends PDAbstractAppearanceHandler
         PDAnnotationPolyline annotation = (PDAnnotationPolyline) getAnnotation();
         PDRectangle rect = annotation.getRectangle();
         float[] pathsArray = annotation.getVertices();
-        if (pathsArray == null)
+        if (pathsArray == null || pathsArray.length < 4)
         {
             return;
         }
@@ -84,39 +86,119 @@ public class PDPolylineAppearanceHandler extends PDAbstractAppearanceHandler
             maxX = Math.max(maxX, x);
             maxY = Math.max(maxY, y);
         }
-        rect.setLowerLeftX(Math.min(minX - ab.width / 2, rect.getLowerLeftX()));
-        rect.setLowerLeftY(Math.min(minY - ab.width / 2, rect.getLowerLeftY()));
-        rect.setUpperRightX(Math.max(maxX + ab.width, rect.getUpperRightX()));
-        rect.setUpperRightY(Math.max(maxY + ab.width, rect.getUpperRightY()));
+        // arrow length is 9 * width at about 30° => 10 * width seems to be enough
+        rect.setLowerLeftX(Math.min(minX - ab.width * 10, rect.getLowerLeftX()));
+        rect.setLowerLeftY(Math.min(minY - ab.width * 10, rect.getLowerLeftY()));
+        rect.setUpperRightX(Math.max(maxX + ab.width * 10, rect.getUpperRightX()));
+        rect.setUpperRightY(Math.max(maxY + ab.width * 10, rect.getUpperRightY()));
         annotation.setRectangle(rect);
 
-        try
+        try (PDAppearanceContentStream cs = getNormalAppearanceAsContentStream())
         {
-            try (PDAppearanceContentStream cs = getNormalAppearanceAsContentStream())
+            boolean hasBackground = cs.setNonStrokingColorOnDemand(annotation.getInteriorColor());
+            setOpacity(cs, annotation.getConstantOpacity());
+            boolean hasStroke = cs.setStrokingColorOnDemand(color);
+
+            if (ab.dashArray != null)
             {
-                handleOpacity(annotation.getConstantOpacity());
+                cs.setLineDashPattern(ab.dashArray, 0);
+            }
+            cs.setLineWidth(ab.width);
 
-                cs.setStrokingColor(color);
-                if (ab.dashArray != null)
+            for (int i = 0; i < pathsArray.length / 2; ++i)
+            {
+                float x = pathsArray[i * 2];
+                float y = pathsArray[i * 2 + 1];
+                if (i == 0)
                 {
-                    cs.setLineDashPattern(ab.dashArray, 0);
+                    if (SHORT_STYLES.contains(annotation.getStartPointEndingStyle()))
+                    {
+                        // modify coordinate to shorten the segment
+                        // https://stackoverflow.com/questions/7740507/extend-a-line-segment-a-specific-distance
+                        float x1 = pathsArray[2];
+                        float y1 = pathsArray[3];
+                        float len = (float) (Math.sqrt(Math.pow(x - x1, 2) + Math.pow(y - y1, 2)));
+                        if (Float.compare(len, 0) != 0)
+                        {
+                            x += (x1 - x) / len * ab.width;
+                            y += (y1 - y) / len * ab.width;
+                        }
+                    }
+                    cs.moveTo(x, y);
                 }
-                cs.setLineWidth(ab.width);
+                else
+                {
+                    if (i == pathsArray.length / 2 - 1 &&
+                        SHORT_STYLES.contains(annotation.getEndPointEndingStyle()))
+                    {
+                        // modify coordinate to shorten the segment
+                        // https://stackoverflow.com/questions/7740507/extend-a-line-segment-a-specific-distance
+                        float x0 = pathsArray[pathsArray.length - 4];
+                        float y0 = pathsArray[pathsArray.length - 3];
+                        float len = (float) (Math.sqrt(Math.pow(x0 - x, 2) + Math.pow(y0 - y, 2)));
+                        if (Float.compare(len, 0) != 0)
+                        {
+                            x -= (x - x0) / len * ab.width;
+                            y -= (y - y0) / len * ab.width;
+                        }
+                    }
+                    cs.lineTo(x, y);
+                }
+            }
+            cs.stroke();
 
-                for (int i = 0; i < pathsArray.length / 2; ++i)
+            // do a transform so that first and last "arms" are imagined flat, like in line handler
+            // the alternative would be to apply the transform to the LE shapes directly,
+            // which would be more work and produce code difficult to understand
+
+            // paint the styles here and after polyline draw, to avoid line crossing a filled shape
+            if (!LE_NONE.equals(annotation.getStartPointEndingStyle()))
+            {
+                // check only needed to avoid q cm Q if LE_NONE
+                float x2 = pathsArray[2];
+                float y2 = pathsArray[3];
+                float x1 = pathsArray[0];
+                float y1 = pathsArray[1];
+                cs.saveGraphicsState();
+                if (ANGLED_STYLES.contains(annotation.getStartPointEndingStyle()))
                 {
-                    float x = pathsArray[i * 2];
-                    float y = pathsArray[i * 2 + 1];
-                    if (i == 0)
-                    {
-                        cs.moveTo(x, y);
-                    }
-                    else
-                    {
-                        cs.lineTo(x, y);
-                    }
+                    double angle = Math.atan2(y2 - y1, x2 - x1);
+                    cs.transform(Matrix.getRotateInstance(angle, x1, y1));
                 }
-                cs.stroke();
+                else
+                {
+                    cs.transform(Matrix.getTranslateInstance(x1, y1));
+                }
+                drawStyle(annotation.getStartPointEndingStyle(), cs, 0, 0, ab.width, hasStroke, hasBackground);
+                cs.restoreGraphicsState();
+            }
+
+            if (!LE_NONE.equals(annotation.getEndPointEndingStyle()))
+            {
+                // check only needed to avoid q cm Q if LE_NONE
+                float x1 = pathsArray[pathsArray.length - 4];
+                float y1 = pathsArray[pathsArray.length - 3];
+                float x2 = pathsArray[pathsArray.length - 2];
+                float y2 = pathsArray[pathsArray.length - 1];
+                // save / restore not needed because it's the last one
+                if (ANGLED_STYLES.contains(annotation.getEndPointEndingStyle()))
+                {
+                    // we're transforming to (x1,y1) instead of to (x2,y2) position
+                    // because drawStyle needs to be aware
+                    // by the non zero x parameter that this is "right ending" side
+                    // of a line. This is important for arrows styles.
+                    //TODO this is not really good and should be improved,
+                    // maybe by an additional parameter for drawStyle?
+                    double angle = Math.atan2(y2 - y1, x2 - x1);
+                    cs.transform(Matrix.getRotateInstance(angle, x1, y1));
+                    float lineLength = (float) Math.sqrt(((x2 - x1) * (x2 - x1)) + ((y2 - y1) * (y2 - y1)));
+                    drawStyle(annotation.getEndPointEndingStyle(), cs, lineLength, 0, ab.width, hasStroke, hasBackground);
+                }
+                else
+                {
+                    cs.transform(Matrix.getTranslateInstance(x2, y2));
+                    drawStyle(annotation.getEndPointEndingStyle(), cs, 0, 0, ab.width, hasStroke, hasBackground);
+                }
             }
         }
         catch (IOException ex)

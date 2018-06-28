@@ -28,6 +28,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.rendering.TestPDFToImage;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 /**
@@ -41,23 +42,27 @@ public class TestFontEmbedding extends TestCase
     private static final File OUT_DIR = new File("target/test-output");
 
     @Override
-    protected void setUp() throws Exception
+    protected void setUp()
     {
         OUT_DIR.mkdirs();
     }
 
     /**
      * Embed a TTF as CIDFontType2.
+     * 
+     * @throws IOException
      */
-    public void testCIDFontType2() throws Exception
+    public void testCIDFontType2() throws IOException
     {
         validateCIDFontType2(false);
     }
 
     /**
      * Embed a TTF as CIDFontType2 with subsetting.
+     * 
+     * @throws IOException
      */
-    public void testCIDFontType2Subset() throws Exception
+    public void testCIDFontType2Subset() throws IOException
     {
         validateCIDFontType2(true);
     }
@@ -166,31 +171,76 @@ public class TestFontEmbedding extends TestCase
         assertEquals(expectedExtractedtext, extracted.replaceAll("\r", "").trim());
     }
 
-    private void validateCIDFontType2(boolean useSubset) throws Exception
+    public void testBengali() throws IOException
     {
-        PDDocument document = new PDDocument();
-        PDPage page = new PDPage(PDRectangle.A4);
-        document.addPage(page);
+        String BANGLA_TEXT_1 = "আমি কোন পথে ক্ষীরের লক্ষ্মী ষন্ড পুতুল রুপো গঙ্গা ঋষি";
+        String BANGLA_TEXT_2 = "দ্রুত গাঢ় শেয়াল অলস কুকুর জুড়ে জাম্প ধুর্ত  হঠাৎ ভাঙেনি মৌলিক ঐশি দৈ";
+        String BANGLA_TEXT_3 = "ঋষি কল্লোল ব্যাস নির্ভয় ";
 
-        InputStream input = TestFontEmbedding.class.getClassLoader().getResourceAsStream(
-                "org/apache/pdfbox/ttf/LiberationSans-Regular.ttf");
-        PDType0Font font = PDType0Font.load(document, input, useSubset);
+        String expectedExtractedtext = BANGLA_TEXT_1 + "\n" + BANGLA_TEXT_2 + "\n" + BANGLA_TEXT_3;
+        File pdf = new File(OUT_DIR, "Bengali.pdf");
 
-        PDPageContentStream stream = new PDPageContentStream(document, page);
+        try (PDDocument document = new PDDocument())
+        {
+            PDPage page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            PDFont font = PDType0Font.load(document, 
+                    this.getClass().getResourceAsStream("/org/apache/pdfbox/ttf/Lohit-Bengali.ttf"));
 
-        stream.beginText();
-        stream.setFont(font, 12);
+            try (PDPageContentStream contentStream = new PDPageContentStream(document, page))
+            {
+                contentStream.beginText();
+                contentStream.setFont(font, 18);
+                contentStream.newLineAtOffset(10, 750);
+                contentStream.showText(BANGLA_TEXT_1);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(BANGLA_TEXT_2);
+                contentStream.newLineAtOffset(0, -30);
+                contentStream.showText(BANGLA_TEXT_3);
+                contentStream.endText();
+            }
 
-        String text = "Unicode русский язык Tiếng Việt";
-        stream.newLineAtOffset(50, 600);
-        stream.showText(text);
+            document.save(pdf);
+        }
 
-        stream.endText();
-        stream.close();
-        
-        File file = new File(OUT_DIR, "CIDFontType2.pdf");
-        document.save(file);
-        document.close();
+        File IN_DIR = new File("src/test/resources/org/apache/pdfbox/ttf");
+ 
+        // compare rendering
+        TestPDFToImage testPDFToImage = new TestPDFToImage(TestPDFToImage.class.getName());
+        if (!testPDFToImage.doTestFile(pdf, IN_DIR.getAbsolutePath(), OUT_DIR.getAbsolutePath()))
+        {
+            // don't fail, rendering is different on different systems, result must be viewed manually
+            System.err.println("Rendering of " + pdf + " failed or is not identical to expected rendering in " + IN_DIR + " directory");
+        }
+
+        // Check text extraction
+        String extracted = getUnicodeText(pdf);
+        //assertEquals(expectedExtractedtext, extracted.replaceAll("\r", "").trim());
+    }
+
+    private void validateCIDFontType2(boolean useSubset) throws IOException
+    {
+        String text;
+        File file;
+        try (PDDocument document = new PDDocument())
+        {
+            PDPage page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            InputStream input = PDFont.class.getClassLoader().getResourceAsStream(
+                    "org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf");
+            PDType0Font font = PDType0Font.load(document, input, useSubset);
+            try (PDPageContentStream stream = new PDPageContentStream(document, page))
+            {
+                stream.beginText();
+                stream.setFont(font, 12);
+                text = "Unicode русский язык Tiếng Việt";
+                stream.newLineAtOffset(50, 600);
+                stream.showText(text);
+                stream.endText();
+            }
+            file = new File(OUT_DIR, "CIDFontType2.pdf");
+            document.save(file);
+        }
 
         // check that the extracted text matches what we wrote
         String extracted = getUnicodeText(file);

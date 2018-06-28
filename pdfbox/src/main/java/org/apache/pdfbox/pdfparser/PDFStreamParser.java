@@ -19,11 +19,11 @@ package org.apache.pdfbox.pdfparser;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.pdfbox.contentstream.PDContentStream;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSBoolean;
@@ -53,12 +53,12 @@ public class PDFStreamParser extends BaseParser
     /**
      * Constructor.
      *
-     * @param contentStream The content stream to parse.
+     * @param stream The content stream to parse.
      * @throws IOException If there is an error initializing the stream.
      */
-    public PDFStreamParser(PDContentStream contentStream) throws IOException
+    public PDFStreamParser(InputStream stream) throws IOException
     {
-        super(new InputStreamSource(contentStream.getContents()));
+        super(new InputStreamSource(stream));
     }
     
     /**
@@ -276,7 +276,8 @@ public class PDFStreamParser extends BaseParser
                 String id = "" + (char) seqSource.read() + (char) seqSource.read();
                 if( !id.equals( "ID" ) )
                 {
-                    throw new IOException( "Error: Expected operator 'ID' actual='" + id + "'" );
+                    throw new IOException( "Error: Expected operator 'ID' actual='" + id +
+                                           "' at stream offset " + seqSource.getPosition());
                 }
                 ByteArrayOutputStream imageData = new ByteArrayOutputStream();
                 if( isWhitespace() )

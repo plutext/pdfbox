@@ -27,11 +27,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.apache.fontbox.FontBoxFont;
-import org.apache.fontbox.util.BoundingBox;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.fontbox.FontBoxFont;
+import org.apache.fontbox.ttf.model.GsubData;
+import org.apache.fontbox.util.BoundingBox;
 
 /**
  * A TrueType font file.
@@ -565,7 +566,7 @@ public class TrueTypeFont implements FontBoxFont, Closeable
             GlyphSubstitutionTable table = getGsub();
             if (table != null)
             {
-                return new SubstitutingCmapLookup(cmap, (GlyphSubstitutionTable) table,
+                return new SubstitutingCmapLookup(cmap, table,
                         Collections.unmodifiableList(enabledGsubFeatures));
             }
         }
@@ -652,6 +653,17 @@ public class TrueTypeFont implements FontBoxFont, Closeable
         }
         
         return 0;
+    }
+
+    public GsubData getGsubData() throws IOException
+    {
+        GlyphSubstitutionTable table = getGsub();
+        if (table == null)
+        {
+            return GsubData.NO_DATA_FOUND;
+        }
+
+        return table.getGsubData();
     }
 
     /**

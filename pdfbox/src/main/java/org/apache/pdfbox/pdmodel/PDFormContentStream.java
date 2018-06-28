@@ -16,14 +16,14 @@
 package org.apache.pdfbox.pdmodel;
 
 import java.io.IOException;
-import org.apache.pdfbox.contentstream.PDAbstractContentStream;
+
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 
 /**
  *
  * @author Tilman Hausherr
  */
-public class PDFormContentStream extends PDAbstractContentStream
+public final class PDFormContentStream extends PDAbstractContentStream
 {
     /**
      * Create a new form XObject content stream.
@@ -34,7 +34,6 @@ public class PDFormContentStream extends PDAbstractContentStream
      */
     public PDFormContentStream(PDFormXObject form) throws IOException
     {
-        super(form.getContentStream().createOutputStream());
-        setResources(form.getResources());
+        super(null, form.getContentStream().createOutputStream(), form.getResources());
     }
 }

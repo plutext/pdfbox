@@ -19,6 +19,9 @@ package org.apache.pdfbox.pdmodel.interactive.annotation.handlers;
 
 import java.awt.geom.AffineTransform;
 import java.io.IOException;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.pdmodel.PDResources;
@@ -27,7 +30,8 @@ import org.apache.pdfbox.pdmodel.graphics.color.PDColor;
 import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationSquareCircle;
-import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceContentStream;
+import org.apache.pdfbox.pdmodel.PDAppearanceContentStream;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceEntry;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
@@ -42,9 +46,24 @@ import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
 public abstract class PDAbstractAppearanceHandler implements PDAppearanceHandler
 {
     private final PDAnnotation annotation;
-    private PDAppearanceEntry appearanceEntry;
-    private PDAppearanceContentStream contentStream;
+
+    /**
+     * Line ending styles where the line has to be drawn shorter (minus line width).
+     */
+    protected static final Set<String> SHORT_STYLES = createShortStyles();
+
+    static final double ARROW_ANGLE = Math.toRadians(30);
+
+    /**
+     * Line ending styles where there is an interior color.
+     */
+    protected static final Set<String> INTERIOR_COLOR_STYLES = createInteriorColorStyles();
     
+    /**
+     * Line ending styles where the shape changes its angle, e.g. arrows.
+     */
+    protected static final Set<String> ANGLED_STYLES = createAngledStyles();
+
     public PDAbstractAppearanceHandler(PDAnnotation annotation)
     {
         this.annotation = annotation;
@@ -106,9 +125,8 @@ public abstract class PDAbstractAppearanceHandler implements PDAppearanceHandler
      */
     PDAppearanceContentStream getNormalAppearanceAsContentStream() throws IOException
     {
-        appearanceEntry = getNormalAppearance();
-        contentStream = getAppearanceEntryAsContentStream(appearanceEntry);
-        return contentStream;
+        PDAppearanceEntry appearanceEntry = getNormalAppearance();
+        return getAppearanceEntryAsContentStream(appearanceEntry);
     }
     
     /**
@@ -192,7 +210,7 @@ public abstract class PDAbstractAppearanceHandler implements PDAppearanceHandler
      * <p>Creates a new rectangle with differences added to each side.
      * .
      * @param rectangle the rectangle.
-     * @param diifferences the differences to apply.
+     * @param differences the differences to apply.
      * @return the padded rectangle.
      */
     PDRectangle addRectDifferences(PDRectangle rectangle, float[] differences)
@@ -214,7 +232,7 @@ public abstract class PDAbstractAppearanceHandler implements PDAppearanceHandler
      * <p>Creates a new rectangle with differences added to each side.
      * .
      * @param rectangle the rectangle.
-     * @param diifferences the differences to apply.
+     * @param differences the differences to apply.
      * @return the padded rectangle.
      */
     PDRectangle applyRectDifferences(PDRectangle rectangle, float[] differences)
@@ -229,37 +247,202 @@ public abstract class PDAbstractAppearanceHandler implements PDAppearanceHandler
                 rectangle.getHeight() - differences[1] - differences[3]);
     }
 
-    void handleOpacity(float opacity) throws IOException
+    void setOpacity(PDAppearanceContentStream contentStream, float opacity) throws IOException
     {
         if (opacity < 1)
         {
             PDExtendedGraphicsState gs = new PDExtendedGraphicsState();
             gs.setStrokingAlphaConstant(opacity);
             gs.setNonStrokingAlphaConstant(opacity);
-            
-            prepareResources();
 
             contentStream.setGraphicsStateParameters(gs);
         }
     }
 
-    /**
-     * Assign the resources dictionary from the appearance entry to the content stream and create
-     * the resources if needed.
-     */
-    void prepareResources()
+    void drawStyle(String style, final PDAppearanceContentStream cs, float x, float y,
+                   float width, boolean hasStroke, boolean hasBackground) throws IOException
     {
-        PDAppearanceStream appearanceStream = appearanceEntry.getAppearanceStream();
-        
-        PDResources resources = appearanceStream.getResources();
-        if (resources == null)
+        switch (style)
         {
-            resources = new PDResources();
-            appearanceStream.setResources(resources);
-            contentStream.setResources(resources);
+            case PDAnnotationLine.LE_OPEN_ARROW:
+            case PDAnnotationLine.LE_CLOSED_ARROW:
+                if (Float.compare(x, 0) != 0)
+                {
+                    // ending
+                    drawArrow(cs, x - width, y, -width * 9);
+                }
+                else
+                {
+                    // start
+                    drawArrow(cs, width, y, width * 9);
+                }
+                break;
+            case PDAnnotationLine.LE_BUTT:
+                cs.moveTo(x, y - width * 3);
+                cs.lineTo(x, y + width * 3);
+                break;
+            case PDAnnotationLine.LE_DIAMOND:
+                drawDiamond(cs, x, y, width * 3);
+                break;
+            case PDAnnotationLine.LE_SQUARE:
+                cs.addRect(x - width * 3, y - width * 3, width * 6, width * 6);
+                break;
+            case PDAnnotationLine.LE_CIRCLE:
+                drawCircle(cs, x, y, width * 3);
+                break;
+            case PDAnnotationLine.LE_R_OPEN_ARROW:
+            case PDAnnotationLine.LE_R_CLOSED_ARROW:
+                if (Float.compare(x, 0) != 0)
+                {
+                    // ending
+                    drawArrow(cs, x + width, y, width * 9);
+                }
+                else
+                {
+                    // start
+                    drawArrow(cs, -width, y, -width * 9);
+                }
+                break;
+            case PDAnnotationLine.LE_SLASH:
+                // the line is 18 x linewidth at an angle of 60°
+                cs.moveTo(x + (float) (Math.cos(Math.toRadians(60)) * width * 9),
+                          y + (float) (Math.sin(Math.toRadians(60)) * width * 9));
+                cs.lineTo(x + (float) (Math.cos(Math.toRadians(240)) * width * 9),
+                          y + (float) (Math.sin(Math.toRadians(240)) * width * 9));
+                break;
+            default:
+                return;
         }
+        if (PDAnnotationLine.LE_R_CLOSED_ARROW.equals(style) || 
+            PDAnnotationLine.LE_CLOSED_ARROW.equals(style))
+        {
+            cs.closePath();
+        }
+        cs.drawShape(width, hasStroke, 
+                     // make sure to only paint a background color (/IC value) 
+                     // for interior color styles, even if an /IC value is set.
+                     INTERIOR_COLOR_STYLES.contains(style) ? hasBackground : false);
     }
-    
+
+    /**
+     * Add the two arms of a horizontal arrow.
+     * 
+     * @param cs Content stream
+     * @param x
+     * @param y
+     * @param len The arm length. Positive goes to the right, negative goes to the left.
+     * 
+     * @throws IOException If the content stream could not be written
+     */
+    void drawArrow(PDAppearanceContentStream cs, float x, float y, float len) throws IOException
+    {
+        // strategy for arrows: angle 30°, arrow arm length = 9 * line width
+        // cos(angle) = x position
+        // sin(angle) = y position
+        // this comes very close to what Adobe is doing
+        cs.moveTo(x + (float) (Math.cos(ARROW_ANGLE) * len), y + (float) (Math.sin(ARROW_ANGLE) * len));
+        cs.lineTo(x, y);
+        cs.lineTo(x + (float) (Math.cos(ARROW_ANGLE) * len), y - (float) (Math.sin(ARROW_ANGLE) * len));
+    }
+
+    /**
+     * Add a square diamond shape (corner on top) to the path.
+     *
+     * @param cs Content stream
+     * @param x
+     * @param y
+     * @param r Radius (to a corner)
+     * 
+     * @throws IOException If the content stream could not be written
+     */
+    void drawDiamond(PDAppearanceContentStream cs, float x, float y, float r) throws IOException
+    {
+        cs.moveTo(x - r, y);
+        cs.lineTo(x, y + r);
+        cs.lineTo(x + r, y);
+        cs.lineTo(x, y - r);
+        cs.closePath();
+    }
+
+    /**
+     * Add a circle shape to the path in clockwise direction.
+     *
+     * @param cs Content stream
+     * @param x
+     * @param y
+     * @param r Radius
+     * 
+     * @throws IOException If the content stream could not be written.
+     */
+    void drawCircle(PDAppearanceContentStream cs, float x, float y, float r) throws IOException
+    {
+        // http://stackoverflow.com/a/2007782/535646
+        float magic = r * 0.551784f;
+        cs.moveTo(x, y + r);
+        cs.curveTo(x + magic, y + r, x + r, y + magic, x + r, y);
+        cs.curveTo(x + r, y - magic, x + magic, y - r, x, y - r);
+        cs.curveTo(x - magic, y - r, x - r, y - magic, x - r, y);
+        cs.curveTo(x - r, y + magic, x - magic, y + r, x, y + r);
+        cs.closePath();
+    }
+
+    /**
+     * Add a circle shape to the path in counterclockwise direction. You'll need this e.g. when
+     * drawing a doughnut shape. See "Nonzero Winding Number Rule" for more information.
+     *
+     * @param cs Content stream
+     * @param x
+     * @param y
+     * @param r Radius
+     *
+     * @throws IOException If the content stream could not be written.
+     */
+    void drawCircle2(PDAppearanceContentStream cs, float x, float y, float r) throws IOException
+    {
+        // http://stackoverflow.com/a/2007782/535646
+        float magic = r * 0.551784f;
+        cs.moveTo(x, y + r);
+        cs.curveTo(x - magic, y + r, x - r, y + magic, x - r, y);
+        cs.curveTo(x - r, y - magic, x - magic, y - r, x, y - r);
+        cs.curveTo(x + magic, y - r, x + r, y - magic, x + r, y);
+        cs.curveTo(x + r, y + magic, x + magic, y + r, x, y + r);
+        cs.closePath();
+    }
+
+    private static Set<String> createShortStyles()
+    {
+        Set<String> shortStyles = new HashSet<>();
+        shortStyles.add(PDAnnotationLine.LE_OPEN_ARROW);
+        shortStyles.add(PDAnnotationLine.LE_CLOSED_ARROW);
+        shortStyles.add(PDAnnotationLine.LE_SQUARE);
+        shortStyles.add(PDAnnotationLine.LE_CIRCLE);
+        shortStyles.add(PDAnnotationLine.LE_DIAMOND);
+        return Collections.unmodifiableSet(shortStyles);
+    }
+
+    private static Set<String> createInteriorColorStyles()
+    {
+        Set<String> interiorColorStyles = new HashSet<>();
+        interiorColorStyles.add(PDAnnotationLine.LE_CLOSED_ARROW);
+        interiorColorStyles.add(PDAnnotationLine.LE_CIRCLE);
+        interiorColorStyles.add(PDAnnotationLine.LE_DIAMOND);
+        interiorColorStyles.add(PDAnnotationLine.LE_R_CLOSED_ARROW);
+        interiorColorStyles.add(PDAnnotationLine.LE_SQUARE);
+        return Collections.unmodifiableSet(interiorColorStyles);
+    }
+
+    private static Set<String> createAngledStyles()
+    {
+        Set<String> angledStyles = new HashSet<>();
+        angledStyles.add(PDAnnotationLine.LE_CLOSED_ARROW);
+        angledStyles.add(PDAnnotationLine.LE_OPEN_ARROW);
+        angledStyles.add(PDAnnotationLine.LE_R_CLOSED_ARROW);
+        angledStyles.add(PDAnnotationLine.LE_R_OPEN_ARROW);
+        angledStyles.add(PDAnnotationLine.LE_BUTT);
+        angledStyles.add(PDAnnotationLine.LE_SLASH);
+        return Collections.unmodifiableSet(angledStyles);
+    }
+
     /**
      * Get the annotations normal appearance.
      * 
@@ -272,23 +455,32 @@ public abstract class PDAbstractAppearanceHandler implements PDAppearanceHandler
     private PDAppearanceEntry getNormalAppearance()
     {
         PDAppearanceDictionary appearanceDictionary = getAppearance();
-        PDAppearanceEntry normalAappearanceEntry = appearanceDictionary.getNormalAppearance();
+        PDAppearanceEntry normalAppearanceEntry = appearanceDictionary.getNormalAppearance();
 
-        if (normalAappearanceEntry.isSubDictionary())
+        if (normalAppearanceEntry.isSubDictionary())
         {
             //TODO replace with "document.getDocument().createCOSStream()" 
-            normalAappearanceEntry = new PDAppearanceEntry(new COSStream());
-            appearanceDictionary.setNormalAppearance(normalAappearanceEntry);
+            normalAppearanceEntry = new PDAppearanceEntry(new COSStream());
+            appearanceDictionary.setNormalAppearance(normalAppearanceEntry);
         }
 
-        return normalAappearanceEntry;
+        return normalAppearanceEntry;
     }
     
     
-    private PDAppearanceContentStream getAppearanceEntryAsContentStream(PDAppearanceEntry appearanceEntryToStream) throws IOException
+    private PDAppearanceContentStream getAppearanceEntryAsContentStream(PDAppearanceEntry appearanceEntry) throws IOException
     {
-        PDAppearanceStream appearanceStream = appearanceEntryToStream.getAppearanceStream();
+        PDAppearanceStream appearanceStream = appearanceEntry.getAppearanceStream();
         setTransformationMatrix(appearanceStream);
+
+        // ensure there are resources
+        PDResources resources = appearanceStream.getResources();
+        if (resources == null)
+        {
+            resources = new PDResources();
+            appearanceStream.setResources(resources);
+        }
+
         return new PDAppearanceContentStream(appearanceStream);
     }
     

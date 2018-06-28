@@ -37,7 +37,7 @@ import org.apache.pdfbox.pdmodel.graphics.color.PDColor;
 import org.apache.pdfbox.pdmodel.interactive.action.PDFormFieldAdditionalActions;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceCharacteristicsDictionary;
-import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceContentStream;
+import org.apache.pdfbox.pdmodel.PDAppearanceContentStream;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceEntry;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
@@ -327,7 +327,7 @@ class AppearanceGeneratorHelper
      */
     private List<Object> tokenize(PDAppearanceStream appearanceStream) throws IOException
     {
-        PDFStreamParser parser = new PDFStreamParser(appearanceStream);
+        PDFStreamParser parser = new PDFStreamParser(appearanceStream.getContents());
         parser.parse();
         return parser.getTokens();
     }
@@ -411,7 +411,10 @@ class AppearanceGeneratorHelper
             
             // get the font
             PDFont font = defaultAppearance.getFont();
-            
+            if (font == null)
+            {
+                throw new IllegalArgumentException("font is null, check whether /DA entry is incomplete or incorrect");
+            }
             // calculate the fontSize (because 0 = autosize)
             float fontSize = defaultAppearance.getFontSize();
             

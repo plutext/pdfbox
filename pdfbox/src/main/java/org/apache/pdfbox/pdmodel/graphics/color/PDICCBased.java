@@ -157,29 +157,24 @@ public final class PDICCBased extends PDCIEBasedColorSpace
                                         Transparency.OPAQUE, DataBuffer.TYPE_BYTE);
             }
         }
-        catch (RuntimeException e)
+        catch (ProfileDataException | CMMException | IllegalArgumentException |
+               ArrayIndexOutOfBoundsException | IOException e)
         {
-            if (e instanceof ProfileDataException ||
-                e instanceof CMMException ||
-                e instanceof IllegalArgumentException ||
-                e instanceof ArrayIndexOutOfBoundsException)
-            {
-                // fall back to alternateColorSpace color space
-                awtColorSpace = null;
-                alternateColorSpace = getAlternateColorSpace();
-                if (alternateColorSpace.equals(PDDeviceRGB.INSTANCE))
-                {
-                    isRGB = true;
-                }
-                LOG.warn("Can't read embedded ICC profile (" + e.getLocalizedMessage() + 
-                         "), using alternate color space: " + alternateColorSpace.getName());
-                initialColor = alternateColorSpace.getInitialColor();
-            }
-            else
-            {
-                throw e;
-            }
+            fallbackToAlternateColorSpace(e);
         }
+    }
+
+    private void fallbackToAlternateColorSpace(Exception e) throws IOException
+    {
+        awtColorSpace = null;
+        alternateColorSpace = getAlternateColorSpace();
+        if (alternateColorSpace.equals(PDDeviceRGB.INSTANCE))
+        {
+            isRGB = true;
+        }
+        LOG.warn("Can't read embedded ICC profile (" + e.getLocalizedMessage() +
+                "), using alternate color space: " + alternateColorSpace.getName());
+        initialColor = alternateColorSpace.getInitialColor();
     }
 
     /**
@@ -377,9 +372,13 @@ public final class PDICCBased extends PDCIEBasedColorSpace
     }
 
     /**
-     * Returns the type of the color space in the ICC profile.
-     * Will be one of {@code TYPE_GRAY}, {@code TYPE_RGB}, or {@code TYPE_CMYK}.
-     * @return an ICC color space type
+     * Returns the type of the color space in the ICC profile. If the ICC profile is invalid, the
+     * type of the alternate colorspace is returned, which will be one of
+     * {@link ColorSpace#TYPE_GRAY TYPE_GRAY}, {@link ColorSpace#TYPE_RGB TYPE_RGB},
+     * {@link ColorSpace#TYPE_CMYK TYPE_CMYK}, or -1 if that one is invalid.
+     *
+     * @return an ICC color space type. See {@link ColorSpace#getType()} and the static values of
+     * {@link ColorSpace} for more details.
      */
     public int getColorSpaceType()
     {

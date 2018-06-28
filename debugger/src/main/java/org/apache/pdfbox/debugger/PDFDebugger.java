@@ -18,6 +18,7 @@ package org.apache.pdfbox.debugger;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FileDialog;
 import java.awt.Toolkit;
@@ -45,12 +46,16 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringTokenizer;
+import javax.imageio.spi.IIORegistry;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import javax.print.attribute.HashPrintRequestAttributeSet;
 import javax.print.attribute.PrintRequestAttributeSet;
 import javax.print.attribute.standard.Sides;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
-import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -106,11 +111,16 @@ import org.apache.pdfbox.debugger.ui.ReaderBottomPanel;
 import org.apache.pdfbox.debugger.ui.RecentFiles;
 import org.apache.pdfbox.debugger.ui.RotationMenu;
 import org.apache.pdfbox.debugger.ui.Tree;
+import org.apache.pdfbox.debugger.ui.ViewMenu;
 import org.apache.pdfbox.debugger.ui.ZoomMenu;
+import org.apache.pdfbox.filter.FilterFactory;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.common.PDPageLabels;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.graphics.color.PDDeviceCMYK;
+import org.apache.pdfbox.pdmodel.graphics.color.PDDeviceRGB;
 import org.apache.pdfbox.pdmodel.interactive.viewerpreferences.PDViewerPreferences;
 import org.apache.pdfbox.printing.PDFPageable;
 
@@ -123,6 +133,8 @@ import org.apache.pdfbox.printing.PDFPageable;
  */
 public class PDFDebugger extends JFrame
 {
+    private static final Log LOG = LogFactory.getLog(PDFDebugger.class);
+
     private static final Set<COSName> SPECIALCOLORSPACES =
             new HashSet<>(Arrays.asList(COSName.INDEXED, COSName.SEPARATION, COSName.DEVICEN));
 
@@ -162,14 +174,6 @@ public class PDFDebugger extends JFrame
     private JMenuItem findMenuItem;
     private JMenuItem findNextMenuItem;
     private JMenuItem findPreviousMenuItem;
-
-    // view menu
-    private JMenuItem viewModeItem;
-    public static JCheckBoxMenuItem showTextStripper;
-    public static JCheckBoxMenuItem showTextStripperBeads;
-    public static JCheckBoxMenuItem showFontBBox;
-    public static JCheckBoxMenuItem showGlyphBounds;
-    public static JCheckBoxMenuItem allowSubsampling;
     
     // configuration
     public static Properties configuration = new Properties();
@@ -212,7 +216,7 @@ public class PDFDebugger extends JFrame
         }
         catch (ClassNotFoundException e)
         {
-            // do nothing. Happens with JDK7 (which has KCMS) and with JDK10 (which hasn't)
+            LOG.debug("KCMS service not found - using LCMS", e);
         }
 
         UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
@@ -230,7 +234,18 @@ public class PDFDebugger extends JFrame
                 new ErrorDialog(throwable).setVisible(true);
             }
         });
-        
+
+        // trigger premature initializations for more accurate rendering benchmarks
+        // See discussion in PDFBOX-3988
+        if (PDType1Font.COURIER.isStandard14())
+        {
+            // Yes this is always true
+            PDDeviceCMYK.INSTANCE.toRGB(new float[] { 0, 0, 0, 0} );
+            PDDeviceRGB.INSTANCE.toRGB(new float[] { 0, 0, 0 } );
+            IIORegistry.getDefaultInstance();
+            FilterFactory.INSTANCE.getFilter(COSName.FLATE_DECODE);
+        }
+
         // open file, if any
         String filename = null;
         String password = "";
@@ -268,6 +283,21 @@ public class PDFDebugger extends JFrame
             }
         }
         viewer.setVisible(true);
+    }
+    
+    public boolean isPageMode()
+    {
+        return this.isPageMode;
+    }
+    
+    public void setPageMode(boolean isPageMode)
+    {
+        this.isPageMode = isPageMode;
+    }
+    
+    public boolean hasDocument()
+    {
+        return document != null;
     }
     
     /**
@@ -377,7 +407,9 @@ public class PDFDebugger extends JFrame
         JMenuBar menuBar = new JMenuBar();
         menuBar.add(createFileMenu());
         menuBar.add(createEditMenu());
-        menuBar.add(createViewMenu());
+        
+        ViewMenu viewMenu = ViewMenu.getInstance(this);
+        menuBar.add(viewMenu.getMenu());
         setJMenuBar(menuBar);
 
         Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
@@ -583,76 +615,6 @@ public class PDFDebugger extends JFrame
         editMenu.add(createFindMenu());
         
         return editMenu;
-    }
-
-    private JMenu createViewMenu()
-    {
-        JMenu viewMenu = new JMenu("View");
-        viewMenu.setMnemonic('V');
-        if (isPageMode)
-        {
-            viewModeItem = new JMenuItem("Show Internal Structure");
-        }
-        else
-        {
-            viewModeItem = new JMenuItem("Show Pages");
-        }
-        viewModeItem.addActionListener(new ActionListener()
-        {
-            @Override
-            public void actionPerformed(ActionEvent actionEvent)
-            {
-                if (isPageMode)
-                {
-                    viewModeItem.setText("Show Pages");
-                    isPageMode = false;
-                }
-                else
-                {
-                    viewModeItem.setText("Show Internal Structure");
-                    isPageMode = true;
-                }
-                if (document != null)
-                {
-                    initTree();
-                }
-            }
-        });
-        viewMenu.add(viewModeItem);
-
-        ZoomMenu zoomMenu = ZoomMenu.getInstance();
-        zoomMenu.setEnableMenu(false);
-        viewMenu.add(zoomMenu.getMenu());
-
-        RotationMenu rotationMenu = RotationMenu.getInstance();
-        rotationMenu.setEnableMenu(false);
-        viewMenu.add(rotationMenu.getMenu());
-
-        viewMenu.addSeparator();
-
-        showTextStripper = new JCheckBoxMenuItem("Show TextStripper TextPositions");        
-        showTextStripper.setEnabled(false);
-        viewMenu.add(showTextStripper);
-
-        showTextStripperBeads = new JCheckBoxMenuItem("Show TextStripper Beads");
-        showTextStripperBeads.setEnabled(false);
-        viewMenu.add(showTextStripperBeads);
-        
-        showFontBBox = new JCheckBoxMenuItem("Show Approximate Text Bounds");
-        showFontBBox.setEnabled(false);
-        viewMenu.add(showFontBBox);
-        
-        showGlyphBounds = new JCheckBoxMenuItem("Show Glyph Bounds");
-        showGlyphBounds.setEnabled(false);
-        viewMenu.add(showGlyphBounds);
-
-        viewMenu.addSeparator();
-
-        allowSubsampling = new JCheckBoxMenuItem("Allow subsampling");
-        allowSubsampling.setEnabled(false);
-        viewMenu.add(allowSubsampling);
-
-        return viewMenu;
     }
 
     private JMenu createFindMenu()
@@ -1263,7 +1225,15 @@ public class PDFDebugger extends JFrame
             }
             if (job.printDialog(pras))
             {
-                job.print(pras);
+                setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+                try
+                {
+                    job.print(pras);
+                }
+                finally
+                {
+                    setCursor(Cursor.getDefaultCursor());
+                }
             }
         }
         catch (PrinterException e)
@@ -1302,7 +1272,7 @@ public class PDFDebugger extends JFrame
         readPDFFile(file, password);
     }
     
-    private void readPDFFile(File file, String password) throws IOException
+    private void readPDFFile(final File file, String password) throws IOException
     {
         if( document != null )
         {
@@ -1316,7 +1286,17 @@ public class PDFDebugger extends JFrame
         recentFiles.removeFile(file.getPath());
         LogDialog.instance().clear();
         
-        parseDocument( file, password );
+        DocumentOpener documentOpener = new DocumentOpener(password)
+        {
+            @Override
+            PDDocument open() throws IOException
+            {
+                return PDDocument.load(file, password);
+            }
+        };
+        document = documentOpener.parse();
+        printMenuItem.setEnabled(true);
+        reopenMenuItem.setEnabled(true);
         
         initTree();
         
@@ -1332,7 +1312,7 @@ public class PDFDebugger extends JFrame
         addRecentFileItems();
     }
     
-    private void readPDFurl(String urlString, String password) throws IOException
+    private void readPDFurl(final String urlString, String password) throws IOException
     {
         if (document != null)
         {
@@ -1343,9 +1323,16 @@ public class PDFDebugger extends JFrame
             }
         }
         currentFilePath = urlString;
-        URL url = new URL(urlString);
         LogDialog.instance().clear();
-        document = PDDocument.load(url.openStream(), password);
+        DocumentOpener documentOpener = new DocumentOpener(password)
+        {
+            @Override
+            PDDocument open() throws IOException
+            {
+                return PDDocument.load(new URL(urlString).openStream(), password);
+            }
+        };
+        document = documentOpener.parse();
         printMenuItem.setEnabled(true);
         reopenMenuItem.setEnabled(true);
 
@@ -1362,7 +1349,7 @@ public class PDFDebugger extends JFrame
         addRecentFileItems();
     }
     
-    private void initTree()
+    public void initTree()
     {
         TreeStatus treeStatus = new TreeStatus(document.getDocument().getTrailer());
         statusPane.updateTreeStatus(treeStatus);
@@ -1385,43 +1372,63 @@ public class PDFDebugger extends JFrame
     }
 
     /**
-     * This will parse a document.
-     *
-     * @param file The file addressing the document.
-     *
-     * @throws IOException If there is an error parsing the document.
+     * Internal class to avoid double code in password entry loop.
      */
-    private void parseDocument( File file, String password )throws IOException
+    abstract class DocumentOpener
     {
-        while (true)
+        String password;
+
+        DocumentOpener(String password)
         {
-            try
+            this.password = password;
+        }
+
+        /**
+         * Override to load the actual input type (File, URL, stream), don't call it directly!
+         * 
+         * @return
+         * @throws IOException 
+         */
+        abstract PDDocument open() throws IOException;
+
+        /**
+         * Call this!
+         * 
+         * @return
+         * @throws IOException 
+         */
+        final PDDocument parse() throws IOException 
+        {
+            while (true)
             {
-                document = PDDocument.load(file, password);
-            }
-            catch (InvalidPasswordException ipe)
-            {
-                // https://stackoverflow.com/questions/8881213/joptionpane-to-get-password
-                JPanel panel = new JPanel();
-                JLabel label = new JLabel("Password:");
-                JPasswordField pass = new JPasswordField(10);
-                panel.add(label);
-                panel.add(pass);
-                String[] options = new String[] {"OK", "Cancel"};
-                int option = JOptionPane.showOptionDialog(null, panel, "Enter password",
-                         JOptionPane.NO_OPTION, JOptionPane.PLAIN_MESSAGE,
-                         null, options, "");
-                if (option == 0)
+                try
                 {
-                    password = new String(pass.getPassword());
-                    continue;
+                    return open();
                 }
-                throw ipe;
+                catch (InvalidPasswordException ipe)
+                {
+                    // https://stackoverflow.com/questions/8881213/joptionpane-to-get-password
+                    JPanel panel = new JPanel();
+                    JLabel label = new JLabel("Password:");
+                    JPasswordField pass = new JPasswordField(10);
+                    panel.add(label);
+                    panel.add(pass);
+                    String[] options = new String[]
+                    {
+                        "OK", "Cancel"
+                    };
+                    int option = JOptionPane.showOptionDialog(null, panel, "Enter password",
+                            JOptionPane.NO_OPTION, JOptionPane.PLAIN_MESSAGE,
+                            null, options, "");
+                    if (option == 0)
+                    {
+                        password = new String(pass.getPassword());
+                        continue;
+                    }
+                    throw ipe;
+                }
             }
-            break;
-        }        
-        printMenuItem.setEnabled(true);
-        reopenMenuItem.setEnabled(true);
+        }
     }
 
     private void addRecentFileItems()

@@ -55,6 +55,84 @@ public class PDAnnotationPolyline extends PDAnnotationMarkup
     }
 
     /**
+     * This will set the line ending style for the start point, see the LE_ constants for the possible values.
+     *
+     * @param style The new style.
+     */
+    public void setStartPointEndingStyle(String style)
+    {
+        String actualStyle = style == null ? PDAnnotationLine.LE_NONE : style;
+        COSBase base = getCOSObject().getDictionaryObject(COSName.LE);
+        COSArray array;
+        if (!(base instanceof COSArray) || ((COSArray) base).size() == 0)
+        {
+            array = new COSArray();
+            array.add(COSName.getPDFName(actualStyle));
+            array.add(COSName.getPDFName(PDAnnotationLine.LE_NONE));
+            getCOSObject().setItem(COSName.LE, array);
+        }
+        else
+        {
+            array = (COSArray) base;
+            array.setName(0, actualStyle);
+        }
+    }
+
+    /**
+     * This will retrieve the line ending style for the start point, possible values shown in the LE_ constants section.
+     *
+     * @return The ending style for the start point, LE_NONE if missing, never null.
+     */
+    public String getStartPointEndingStyle()
+    {
+        COSBase base = getCOSObject().getDictionaryObject(COSName.LE);
+        if (base instanceof COSArray && ((COSArray) base).size() >= 2)
+        {
+            return ((COSArray) base).getName(0, PDAnnotationLine.LE_NONE);
+        }
+        return PDAnnotationLine.LE_NONE;
+    }
+
+    /**
+     * This will set the line ending style for the end point, see the LE_ constants for the possible values.
+     *
+     * @param style The new style.
+     */
+    public void setEndPointEndingStyle(String style)
+    {
+        String actualStyle = style == null ? PDAnnotationLine.LE_NONE : style;
+        COSBase base = getCOSObject().getDictionaryObject(COSName.LE);
+        COSArray array;
+        if (!(base instanceof COSArray) || ((COSArray) base).size() < 2)
+        {
+            array = new COSArray();
+            array.add(COSName.getPDFName(PDAnnotationLine.LE_NONE));
+            array.add(COSName.getPDFName(actualStyle));
+            getCOSObject().setItem(COSName.LE, array);
+        }
+        else
+        {
+            array = (COSArray) base;
+            array.setName(1, actualStyle);
+        }
+    }
+
+    /**
+     * This will retrieve the line ending style for the end point, possible values shown in the LE_ constants section.
+     *
+     * @return The ending style for the end point, LE_NONE if missing, never null.
+     */
+    public String getEndPointEndingStyle()
+    {
+        COSBase base = getCOSObject().getDictionaryObject(COSName.LE);
+        if (base instanceof COSArray && ((COSArray) base).size() >= 2)
+        {
+            return ((COSArray) base).getName(1, PDAnnotationLine.LE_NONE);
+        }
+        return PDAnnotationLine.LE_NONE;
+    }
+
+    /**
      * This will set interior color of the line endings defined in the LE entry.
      *
      * @param ic color.

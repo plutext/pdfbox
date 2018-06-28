@@ -22,11 +22,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashSet;
 import java.util.Set;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.fontbox.cmap.CMap;
+import org.apache.fontbox.ttf.CmapLookup;
 import org.apache.fontbox.ttf.TTFParser;
 import org.apache.fontbox.ttf.TrueTypeFont;
+import org.apache.fontbox.ttf.model.GsubData;
 import org.apache.fontbox.util.BoundingBox;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -47,12 +50,14 @@ public class PDType0Font extends PDFont implements PDVectorFont
 
     private final PDCIDFont descendantFont;
     private final Set<Integer> noUnicode = new HashSet<>(); 
+    private final GsubData gsubData;
+    private final CmapLookup cmapLookup;
     private CMap cMap, cMapUCS2;
     private boolean isCMapPredefined;
     private boolean isDescendantCJK;
     private PDCIDFontType2Embedder embedder;
     private TrueTypeFont ttf;
-    
+
     /**
      * Constructor for reading a Type0 font from a PDF file.
      * 
@@ -62,6 +67,10 @@ public class PDType0Font extends PDFont implements PDVectorFont
     public PDType0Font(COSDictionary fontDictionary) throws IOException
     {
         super(fontDictionary);
+
+        gsubData = GsubData.NO_DATA_FOUND;
+        cmapLookup = null;
+
         COSBase base = dict.getDictionaryObject(COSName.DESCENDANT_FONTS);
         if (!(base instanceof COSArray))
         {
@@ -92,6 +101,10 @@ public class PDType0Font extends PDFont implements PDVectorFont
         {
             ttf.enableVerticalSubstitutions();
         }
+
+        gsubData = ttf.getGsubData();
+        cmapLookup = ttf.getUnicodeCmapLookup();
+
         embedder = new PDCIDFontType2Embedder(document, dict, ttf, embedSubset, this, vertical);
         descendantFont = embedder.getCIDFont();
         readEncoding();
@@ -104,7 +117,7 @@ public class PDType0Font extends PDFont implements PDVectorFont
             }
             else
             {
-                // the TTF is fully loaded and it is save to close the underlying data source
+                // the TTF is fully loaded and it is safe to close the underlying data source
                 ttf.close();
             }
         }
@@ -232,6 +245,15 @@ public class PDType0Font extends PDFont implements PDVectorFont
         embedder.addToSubset(codePoint);
     }
     
+    public void addGlyphsToSubset(Set<Integer> glyphIds)
+    {
+        if (!willBeSubset())
+        {
+            throw new IllegalStateException("This font was created with subsetting disabled");
+        }
+        embedder.addGlyphIds(glyphIds);
+    }
+
     @Override
     public void subset() throws IOException
     {
@@ -553,7 +575,7 @@ public class PDType0Font extends PDFont implements PDVectorFont
         {
             descendant = getDescendantFont().getClass().getSimpleName();
         }
-        return getClass().getSimpleName() + "/" + descendant + " " + getBaseFont();
+        return getClass().getSimpleName() + "/" + descendant + ", PostScript name: " + getBaseFont();
     }
 
     @Override
@@ -574,4 +596,20 @@ public class PDType0Font extends PDFont implements PDVectorFont
     {
         return descendantFont.hasGlyph(code);
     }
+
+    public GsubData getGsubData()
+    {
+        return gsubData;
+    }
+
+    public byte[] encodeGlyphId(int glyphId)
+    {
+        return descendantFont.encodeGlyphId(glyphId);
+    }
+
+    public CmapLookup getCmapLookup()
+    {
+        return cmapLookup;
+    }
+
 }

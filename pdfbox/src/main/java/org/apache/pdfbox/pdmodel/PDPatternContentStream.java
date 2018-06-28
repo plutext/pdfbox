@@ -16,14 +16,14 @@
 package org.apache.pdfbox.pdmodel;
 
 import java.io.IOException;
-import org.apache.pdfbox.contentstream.PDAbstractContentStream;
+
 import org.apache.pdfbox.pdmodel.graphics.pattern.PDTilingPattern;
 
 /**
  *
  * @author Tilman Hausherr
  */
-public class PDPatternContentStream extends PDAbstractContentStream
+public final class PDPatternContentStream extends PDAbstractContentStream
 {
     /**
      * Create a new tiling pattern content stream.
@@ -34,7 +34,6 @@ public class PDPatternContentStream extends PDAbstractContentStream
      */
     public PDPatternContentStream(PDTilingPattern pattern) throws IOException
     {
-        super(pattern.getContentStream().createOutputStream());
-        setResources(pattern.getResources());
+        super(null, pattern.getContentStream().createOutputStream(), pattern.getResources());
     }
 }

@@ -1232,9 +1232,9 @@ public class PDDocument implements Closeable
 
     /**
      * This will save the document to an output stream.
-     * 
-     * @param output The stream to write to. It is recommended to wrap it in a
-     * {@link java.io.BufferedOutputStream}, unless it is already buffered.
+     *
+     * @param output The stream to write to. It will be closed when done. It is recommended to wrap
+     * it in a {@link java.io.BufferedOutputStream}, unless it is already buffered.
      *
      * @throws IOException if the output could not be written
      */
@@ -1263,7 +1263,8 @@ public class PDDocument implements Closeable
      * Save the PDF as an incremental update. This is only possible if the PDF was loaded from a
      * file or a stream, not if the document was created in PDFBox itself.
      *
-     * @param output stream to write. It should <i><b>not</b></i> point to the source file.
+     * @param output stream to write to. It will be closed when done. It should <i><b>not</b></i>
+     * point to the source file.
      * @throws IOException if the output could not be written
      * @throws IllegalStateException if the document was not loaded from a file or a stream.
      */
@@ -1307,7 +1308,8 @@ public class PDDocument implements Closeable
      * {@code PDDocument} instance and only AFTER {@link ExternalSigningSupport} instance is used.
      * </p>
      *
-     * @param output stream to write final PDF. It should <i><b>not</b></i> point to the source file.
+     * @param output stream to write the final PDF. It should <i><b>not</b></i> point to the source
+     * file. It will be closed when the document is closed.
      * @return instance to be used for external signing and setting CMS signature
      * @throws IOException if the output could not be written
      * @throws IllegalStateException if the document was not loaded from a file or a stream or
@@ -1389,19 +1391,32 @@ public class PDDocument implements Closeable
     {
         if (!document.isClosed())
         {
+             // Make sure that:
+            // - first Exception is kept
+            // - all IO resources are closed
+            // - there's a way to see which errors occured
+
+            IOException firstException = null;
+
             // close resources and COSWriter
             if (signingSupport != null)
             {
-                signingSupport.close();
+                firstException = IOUtils.closeAndLogException(signingSupport, LOG, "SigningSupport", firstException);
             }
 
             // close all intermediate I/O streams
-            document.close();
+            firstException = IOUtils.closeAndLogException(document, LOG, "COSDocument", firstException);
             
             // close the source PDF stream, if we read from one
             if (pdfSource != null)
             {
-                pdfSource.close();
+                firstException = IOUtils.closeAndLogException(pdfSource, LOG, "RandomAccessRead pdfSource", firstException);
+            }
+
+            // rethrow first exception to keep method contract
+            if (firstException != null)
+            {
+                throw firstException;
             }
         }
     }
@@ -1541,7 +1556,7 @@ public class PDDocument implements Closeable
     {
         float currentVersion = getVersion();
         // nothing to do?
-        if (newVersion == currentVersion)
+        if (Float.compare(newVersion,currentVersion) == 0)
         {
             return;
         }

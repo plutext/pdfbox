@@ -151,7 +151,7 @@ public class PDTrueTypeFont extends PDSimpleFont implements PDVectorFont
         glyphList = GlyphList.getAdobeGlyphList();
         if (closeTTF)
         {
-            // the TTF is fully loaded and it is save to close the underlying data source
+            // the TTF is fully loaded and it is safe to close the underlying data source
             ttf.close();
         }
     }
@@ -329,7 +329,7 @@ public class PDTrueTypeFont extends PDSimpleFont implements PDVectorFont
         int gid = codeToGID(code);
         float width = ttf.getAdvanceWidth(gid);
         float unitsPerEM = ttf.getUnitsPerEm();
-        if (unitsPerEM != 1000)
+        if (Float.compare(unitsPerEM, 1000) != 0)
         {
             width *= 1000f / unitsPerEM;
         }

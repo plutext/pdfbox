@@ -47,6 +47,7 @@ public class IndexToLocationTable extends TTFTable
      * @param data The stream to read the data from.
      * @throws IOException If there is an error reading the data.
      */
+    @Override
     public void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
     {
         HeaderTable head = ttf.getHeader();
@@ -56,7 +57,7 @@ public class IndexToLocationTable extends TTFTable
         {
             if( head.getIndexToLocFormat() == SHORT_OFFSETS )
             {
-                offsets[i] = data.readUnsignedShort() * 2;
+                offsets[i] = data.readUnsignedShort() * 2L;
             }
             else if(  head.getIndexToLocFormat() == LONG_OFFSETS )
             {
@@ -64,7 +65,7 @@ public class IndexToLocationTable extends TTFTable
             }
             else
             {
-                throw new IOException( "Error:TTF.loca unknown offset format.");
+                throw new IOException( "Error:TTF.loca unknown offset format: " + head.getIndexToLocFormat());
             }
         }
         initialized = true;

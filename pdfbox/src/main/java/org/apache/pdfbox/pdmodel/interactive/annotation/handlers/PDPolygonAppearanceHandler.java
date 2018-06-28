@@ -27,7 +27,9 @@ import org.apache.pdfbox.cos.COSNumber;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationPolygon;
-import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceContentStream;
+import org.apache.pdfbox.pdmodel.PDAppearanceContentStream;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDBorderEffectDictionary;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary;
 
 /**
@@ -89,32 +91,41 @@ public class PDPolygonAppearanceHandler extends PDAbstractAppearanceHandler
         rect.setUpperRightY(Math.max(maxY + lineWidth, rect.getUpperRightY()));
         annotation.setRectangle(rect);
 
-        try
+        try (PDAppearanceContentStream contentStream = getNormalAppearanceAsContentStream())
         {
-            try (PDAppearanceContentStream contentStream = getNormalAppearanceAsContentStream())
+            boolean hasStroke = contentStream.setStrokingColorOnDemand(getColor());
+
+            boolean hasBackground = contentStream
+                    .setNonStrokingColorOnDemand(annotation.getInteriorColor());
+
+            setOpacity(contentStream, annotation.getConstantOpacity());
+
+            contentStream.setBorderLine(lineWidth, annotation.getBorderStyle());
+            //TODO find better way to do this. Either pass border array to
+            // setBorderLine(), or use AnnotationBorder class
+            if (annotation.getBorderStyle() == null)
             {
-                boolean hasStroke = contentStream.setStrokingColorOnDemand(getColor());
-
-                boolean hasBackground = contentStream
-                        .setNonStrokingColorOnDemand(annotation.getInteriorColor());
-
-                handleOpacity(annotation.getConstantOpacity());
-
-                contentStream.setBorderLine(lineWidth, annotation.getBorderStyle());
-                //TODO find better way to do this. Either pass border array to
-                // setBorderLine(), or use AnnotationBorder class
-                if (annotation.getBorderStyle() == null)
+                COSArray border = annotation.getBorder();
+                if (border.size() > 3 && border.getObject(3) instanceof COSArray)
                 {
-                    COSArray border = annotation.getBorder();
-                    if (border.size() > 3 && border.getObject(3) instanceof COSArray)
-                    {
-                        contentStream.setLineDashPattern(((COSArray) border.getObject(3)).toFloatArray(), 0);
-                    }
+                    contentStream.setLineDashPattern(((COSArray) border.getObject(3)).toFloatArray(), 0);
                 }
+            }
 
+            PDBorderEffectDictionary borderEffect = annotation.getBorderEffect();
+            if (borderEffect != null && borderEffect.getStyle().equals(PDBorderEffectDictionary.STYLE_CLOUDY))
+            {
+                CloudyBorder cloudyBorder = new CloudyBorder(contentStream,
+                    borderEffect.getIntensity(), lineWidth, getRectangle());
+                cloudyBorder.createCloudyPolygon(pathArray);
+                annotation.setRectangle(cloudyBorder.getRectangle());
+                PDAppearanceStream appearanceStream = annotation.getNormalAppearanceStream();
+                appearanceStream.setBBox(cloudyBorder.getBBox());
+                appearanceStream.setMatrix(cloudyBorder.getMatrix());
+            }
+            else
+            {
                 // the differences rectangle
-                // TODO: this only works for border effect solid. Cloudy needs a
-                // different approach.
                 setRectDifference(lineWidth);
 
                 // Acrobat applies a padding to each side of the bbox so the line is
@@ -143,9 +154,8 @@ public class PDPolygonAppearanceHandler extends PDAbstractAppearanceHandler
                         }
                     }
                 }
-
-                contentStream.drawShape(lineWidth, hasStroke, hasBackground);
             }
+            contentStream.drawShape(lineWidth, hasStroke, hasBackground);
         }
         catch (IOException e)
         {

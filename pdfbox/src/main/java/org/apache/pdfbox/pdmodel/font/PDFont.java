@@ -319,7 +319,8 @@ public abstract class PDFont implements COSObjectable, PDFontLike
     public final byte[] encode(String text) throws IOException
     {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        for (int offset = 0; offset < text.length(); )
+        int offset = 0;
+        while (offset < text.length())
         {
             int codePoint = text.codePointAt(offset);
 
@@ -376,7 +377,7 @@ public abstract class PDFont implements COSObjectable, PDFontLike
     public float getAverageFontWidth()
     {
         float average;
-        if (avgFontWidth != 0.0f)
+        if (Float.compare(avgFontWidth, 0.0f) != 0)
         {
             average = avgFontWidth;
         }
@@ -524,7 +525,7 @@ public abstract class PDFont implements COSObjectable, PDFontLike
      */
     public float getSpaceWidth()
     {
-        if (fontWidthOfSpace == -1f)
+        if (Float.compare(fontWidthOfSpace, -1f) == 0)
         {
             COSBase toUnicode = dict.getDictionaryObject(COSName.TO_UNICODE);
             try

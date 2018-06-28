@@ -18,6 +18,8 @@ package org.apache.pdfbox.multipdf;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
 
 import junit.framework.TestCase;
 import org.apache.pdfbox.cos.COSArray;
@@ -178,10 +180,10 @@ public class PDFMergerUtilityTest extends TestCase
         PDDocument dst = PDDocument.load(new File(TARGETPDFDIR, "PDFBOX-3999-GeneralForbearance.pdf"));
         pdfMergerUtility.appendDocument(dst, src);
         src.close();
-        dst.save(new File(TARGETTESTDIR, "PDFBOX-3999-GovFormPreFlattened-merged.pdf"));
+        dst.save(new File(TARGETTESTDIR, "PDFBOX-3999-GeneralForbearance-merged.pdf"));
         dst.close();
 
-        PDDocument doc = PDDocument.load(new File(TARGETTESTDIR, "PDFBOX-3999-GovFormPreFlattened-merged.pdf"));
+        PDDocument doc = PDDocument.load(new File(TARGETTESTDIR, "PDFBOX-3999-GeneralForbearance-merged.pdf"));
         PDPageTree pageTree = doc.getPages();
 
         // check for orphan pages in the StructTreeRoot/K and StructTreeRoot/ParentTree trees.
@@ -190,9 +192,90 @@ public class PDFMergerUtilityTest extends TestCase
         checkElement(pageTree, structureTreeRoot.getK());
     }
 
+    /**
+     * PDFBOX-3999: check that no streams are kept from the source document by the destination
+     * document, despite orphan annotations remaining in the structure tree.
+     *
+     * @throws IOException
+     */
+    public void testStructureTreeMerge2() throws IOException
+    {
+        PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
+        PDDocument doc = PDDocument.load(new File(TARGETPDFDIR, "PDFBOX-3999-GeneralForbearance.pdf"));
+        doc.getDocumentCatalog().getAcroForm().flatten();
+        doc.save(new File(TARGETTESTDIR, "PDFBOX-3999-GeneralForbearance-flattened.pdf"));
+
+        ElementCounter elementCounter = new ElementCounter();
+        elementCounter.walk(doc.getDocumentCatalog().getStructureTreeRoot().getK());
+        int singleCnt = elementCounter.cnt;
+        int singleSetSize = elementCounter.set.size();
+
+        doc.close();
+
+        PDDocument src = PDDocument.load(new File(TARGETTESTDIR, "PDFBOX-3999-GeneralForbearance-flattened.pdf"));
+        PDDocument dst = PDDocument.load(new File(TARGETTESTDIR, "PDFBOX-3999-GeneralForbearance-flattened.pdf"));
+        pdfMergerUtility.appendDocument(dst, src);
+        // before solving PDFBOX-3999, the close() below brought
+        // IOException: COSStream has been closed and cannot be read.
+        src.close();
+        dst.save(new File(TARGETTESTDIR, "PDFBOX-3999-GeneralForbearance-flattened-merged.pdf"));
+        dst.close();
+
+        doc = PDDocument.load(new File(TARGETTESTDIR, "PDFBOX-3999-GeneralForbearance-flattened-merged.pdf"));
+        PDPageTree pageTree = doc.getPages();
+
+        // check for orphan pages in the StructTreeRoot/K and StructTreeRoot/ParentTree trees.
+        PDStructureTreeRoot structureTreeRoot = doc.getDocumentCatalog().getStructureTreeRoot();
+        checkElement(pageTree, structureTreeRoot.getParentTree().getCOSObject());
+        checkElement(pageTree, structureTreeRoot.getK());
+
+        // Assume that the merged tree has double element count
+        elementCounter = new ElementCounter();
+        elementCounter.walk(structureTreeRoot.getK());
+        assertEquals(singleCnt * 2, elementCounter.cnt);
+        assertEquals(singleSetSize * 2, elementCounter.set.size());
+
+        doc.close();
+    }
+
+    private class ElementCounter
+    {
+        int cnt = 0;
+        Set<COSBase> set = new HashSet<>();
+
+        void walk(COSBase base)
+        {
+            if (base instanceof COSArray)
+            {
+                for (COSBase base2 : (COSArray) base)
+                {
+                    if (base2 instanceof COSObject)
+                    {
+                        base2 = ((COSObject) base2).getObject();
+                    }
+                    walk(base2);
+                }
+            }
+            else if (base instanceof COSDictionary)
+            {
+                COSDictionary kdict = (COSDictionary) base;
+                if (kdict.containsKey(COSName.PG))
+                {
+                    ++cnt;
+                    set.add(kdict);
+                }
+                if (kdict.containsKey(COSName.K))
+                {
+                    walk(kdict.getDictionaryObject(COSName.K));
+                }
+            }
+        }
+    }
+
     // Each element can be an array, a dictionary or a number.
-    // See PDF specification Table 37 â€“ Entries in a number tree node dictionary
-    // See PDF specification Table 322 â€“ Entries in the structure tree root
+    // See PDF specification Table 37 - Entries in a number tree node dictionary
+    // See PDF specification Table 322 - Entries in the structure tree root
+    // See PDF specification Table 323 - Entries in a structure element dictionary
     // example of file with /Kids: 000153.pdf 000208.pdf 000314.pdf 000359.pdf 000671.pdf
     // from digitalcorpora site
     private void checkElement(PDPageTree pageTree, COSBase base)

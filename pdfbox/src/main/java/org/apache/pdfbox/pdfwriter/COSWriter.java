@@ -216,9 +216,10 @@ public class COSWriter implements ICOSVisitor, Closeable
     private COSArray byteRangeArray;
 
     /**
-     * COSWriter constructor comment.
+     * COSWriter constructor.
      *
-     * @param outputStream The wrapped output stream.
+     * @param outputStream The output stream to write the PDF. It will be closed when this object is
+     * closed.
      */
     public COSWriter(OutputStream outputStream)
     {
@@ -227,11 +228,12 @@ public class COSWriter implements ICOSVisitor, Closeable
     }
 
     /**
-     * COSWriter constructor for incremental updates. 
+     * COSWriter constructor for incremental updates.
      *
-     * @param outputStream output stream where the new PDF data will be written
+     * @param outputStream output stream where the new PDF data will be written. It will be closed
+     * when this object is closed.
      * @param inputData random access read containing source PDF data
-     * 
+     *
      * @throws IOException if something went wrong
      */
     public COSWriter(OutputStream outputStream, RandomAccessRead inputData) throws IOException
@@ -253,7 +255,7 @@ public class COSWriter implements ICOSVisitor, Closeable
           
           Map<COSObjectKey, Long> xrefTable = cosDoc.getXrefTable();
           Set<COSObjectKey> keySet = xrefTable.keySet();
-          long highestNumber=0;
+          long highestNumber = doc.getDocument().getHighestXRefObjectNumber();
           for ( COSObjectKey cosObjectKey : keySet ) 
           {
             COSBase object = cosDoc.getObjectFromPool(cosObjectKey).getObject();
@@ -297,10 +299,6 @@ public class COSWriter implements ICOSVisitor, Closeable
         if (getStandardOutput() != null)
         {
             getStandardOutput().close();
-        }
-        if (getOutput() != null)
-        {
-            getOutput().close();
         }
         if (incrementalOutput != null)
         {

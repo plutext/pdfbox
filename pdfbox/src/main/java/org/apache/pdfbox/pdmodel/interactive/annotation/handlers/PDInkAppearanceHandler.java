@@ -22,7 +22,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColor;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationInk;
-import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceContentStream;
+import org.apache.pdfbox.pdmodel.PDAppearanceContentStream;
 
 /**
  * Handler to generate the ink annotations appearance.
@@ -57,41 +57,38 @@ public class PDInkAppearanceHandler extends PDAbstractAppearanceHandler
             return;
         }
 
-        try
+        try (PDAppearanceContentStream cs = getNormalAppearanceAsContentStream())
         {
-            try (PDAppearanceContentStream cs = getNormalAppearanceAsContentStream())
+            setOpacity(cs, ink.getConstantOpacity());
+
+            cs.setStrokingColor(color);
+            if (ab.dashArray != null)
             {
-                handleOpacity(ink.getConstantOpacity());
+                cs.setLineDashPattern(ab.dashArray, 0);
+            }
+            cs.setLineWidth(ab.width);
 
-                cs.setStrokingColor(color);
-                if (ab.dashArray != null)
+            for (float[] pathArray : ink.getInkList())
+            {
+                int nPoints = pathArray.length / 2;
+
+                // "When drawn, the points shall be connected by straight lines or curves 
+                // in an implementation-dependent way" - we do lines.
+                for (int i = 0; i < nPoints; ++i)
                 {
-                    cs.setLineDashPattern(ab.dashArray, 0);
-                }
-                cs.setLineWidth(ab.width);
+                    float x = pathArray[i * 2];
+                    float y = pathArray[i * 2 + 1];
 
-                for (float[] pathArray : ink.getInkList())
-                {
-                    int nPoints = pathArray.length / 2;
-
-                    // "When drawn, the points shall be connected by straight lines or curves 
-                    // in an implementation-dependent way" - we do lines.
-                    for (int i = 0; i < nPoints; ++i)
+                    if (i == 0)
                     {
-                        float x = pathArray[i * 2];
-                        float y = pathArray[i * 2 + 1];
-
-                        if (i == 0)
-                        {
-                            cs.moveTo(x, y);
-                        }
-                        else
-                        {
-                            cs.lineTo(x, y);
-                        }
+                        cs.moveTo(x, y);
                     }
-                    cs.stroke();
+                    else
+                    {
+                        cs.lineTo(x, y);
+                    }
                 }
+                cs.stroke();
             }
         }
         catch (IOException ex)

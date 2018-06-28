@@ -21,29 +21,25 @@ import java.awt.geom.PathIterator;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Stack;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.pdfbox.contentstream.PDAbstractContentStream;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSName;
-import org.apache.pdfbox.pdfwriter.COSWriter;
 import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList;
-import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColor;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColorSpace;
 import org.apache.pdfbox.pdmodel.graphics.color.PDICCBased;
 import org.apache.pdfbox.pdmodel.graphics.color.PDPattern;
 import org.apache.pdfbox.pdmodel.graphics.color.PDSeparation;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDInlineImage;
-import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
-import org.apache.pdfbox.pdmodel.graphics.state.RenderingMode;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
+import org.apache.pdfbox.util.Charsets;
 import org.apache.pdfbox.util.Matrix;
 
 /**
@@ -53,7 +49,6 @@ import org.apache.pdfbox.util.Matrix;
  */
 public final class PDPageContentStream extends PDAbstractContentStream implements Closeable
 {
-    
     /**
      * This is to choose what to do with the stream: overwrite, append or prepend.
      */
@@ -84,13 +79,6 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     }
   
     private static final Log LOG = LogFactory.getLog(PDPageContentStream.class);
-
-    private final PDDocument document;
-
-    private final Stack<PDFont> fontStack = new Stack<>();
-
-    private final Stack<PDColorSpace> nonStrokingColorSpaceStack = new Stack<>();
-    private final Stack<PDColorSpace> strokingColorSpaceStack = new Stack<>();
 
     /**
      * Create a new PDPage content stream. This constructor overwrites all existing content streams
@@ -139,16 +127,25 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     public PDPageContentStream(PDDocument document, PDPage sourcePage, AppendMode appendContent,
                                boolean compress, boolean resetContext) throws IOException
     {
-        super();
-        this.document = document;
-        COSName filter = compress ? COSName.FLATE_DECODE : null;
-        
+        this(document, sourcePage, appendContent, compress, resetContext, new PDStream(document),
+                sourcePage.getResources() != null ? sourcePage.getResources() : new PDResources());
+    }
+
+    private PDPageContentStream(PDDocument document, PDPage sourcePage, AppendMode appendContent,
+                                boolean compress, boolean resetContext,PDStream stream,
+                                PDResources resources) throws IOException
+    {
+        super(document, stream.createOutputStream(compress ? COSName.FLATE_DECODE : null), resources);
+
+        // propagate resources to the page
+        if (sourcePage.getResources() == null)
+        {
+            sourcePage.setResources(resources);
+        }
+
         // If request specifies the need to append/prepend to the document
         if (!appendContent.isOverwrite() && sourcePage.hasContents())
         {
-            // Create a stream to append new content
-            PDStream contentsToAppend = new PDStream(document);
-            
             // Add new stream to contents array
             COSBase contents = sourcePage.getCOSObject().getDictionaryObject(COSName.CONTENTS);
             COSArray array;
@@ -163,35 +160,36 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
                 array = new COSArray();
                 array.add(contents);
             }
+
             if (appendContent.isPrepend())
             {
-                array.add(0, contentsToAppend.getCOSObject());
+                array.add(0, stream.getCOSObject());
             }
             else
             {
-                array.add(contentsToAppend);
+                array.add(stream);
             }
 
             // save the initial/unmodified graphics context
             if (resetContext)
             {
-                // create a new stream to encapsulate the existing stream
-                PDStream saveGraphics = new PDStream(document);
-                setOutputStream(saveGraphics.createOutputStream(filter));
-                
-                // save the initial/unmodified graphics context
-                saveGraphicsState();
-                close();
-                
+                // create a new stream to prefix existing stream
+                PDStream prefixStream = new PDStream(document);
+
+                // save the pre-append graphics state
+                OutputStream prefixOut = prefixStream.createOutputStream();
+                prefixOut.write("q".getBytes(Charsets.US_ASCII));
+                prefixOut.write('\n');
+                prefixOut.close();
+
                 // insert the new stream at the beginning
-                array.add(0, saveGraphics.getCOSObject());
+                array.add(0, prefixStream.getCOSObject());
             }
 
             // Sets the compoundStream as page contents
             sourcePage.getCOSObject().setItem(COSName.CONTENTS, array);
-            setOutputStream(contentsToAppend.createOutputStream(filter));
 
-            // restore the initial/unmodified graphics context
+            // restore the pre-append graphics state
             if (resetContext)
             {
                 restoreGraphicsState();
@@ -203,20 +201,9 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
             {
                 LOG.warn("You are overwriting an existing content, you should use the append mode");
             }
-            PDStream contents = new PDStream(document);
-            sourcePage.setContents(contents);
-            setOutputStream(contents.createOutputStream(filter));
+            sourcePage.setContents(stream);
         }
-        
-        // this has to be done here, as the resources will be set to null when resetting the content
-        // stream
-        PDResources resources = sourcePage.getResources();
-        if (resources == null)
-        {
-            resources = new PDResources();
-            sourcePage.setResources(resources);
-        }
-        setResources(resources);
+
         // configure NumberFormat
         setMaximumFractionDigits(5);
     }
@@ -242,39 +229,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
      */
     public PDPageContentStream(PDDocument doc, PDAppearanceStream appearance, OutputStream outputStream)
     {
-        super(outputStream);
-        this.document = doc;
-        
-        setResources(appearance.getResources());
-    }
-
-    /**
-     * Set the font and font size to draw text with.
-     *
-     * @param font The font to use.
-     * @param fontSize The font size to draw the text.
-     * @throws IOException If there is an error writing the font information.
-     */
-    @Override
-    public void setFont(PDFont font, float fontSize) throws IOException
-    {
-        if (fontStack.isEmpty())
-        {
-            fontStack.add(font);
-        }
-        else
-        {
-            fontStack.setElementAt(font, fontStack.size() - 1);
-        }
-        
-        if (font.willBeSubset())
-        {
-            document.getFontsToSubset().add(font);
-        }
-        
-        writeOperand(getResources().add(font));
-        writeOperand(fontSize);
-        writeOperator("Tf");
+        super(doc, outputStream, appearance.getResources());
     }
 
     /**
@@ -288,42 +243,6 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     public void drawString(String text) throws IOException
     {
         showText(text);
-    }
-
-    /**
-     * Outputs a string using the correct encoding and subsetting as required.
-     *
-     * @param text The Unicode text to show.
-     * 
-     * @throws IOException If an io exception occurs.
-     */
-    @Override
-    protected void showTextInternal(String text) throws IOException
-    {
-        if (!isInTextMode())
-        {
-            throw new IllegalStateException("Must call beginText() before showText()");
-        }
-
-        if (fontStack.isEmpty())
-        {
-            throw new IllegalStateException("Must call setFont() before showText()");
-        }
-
-        PDFont font = fontStack.peek();
-
-        // Unicode code points to keep when subsetting
-        if (font.willBeSubset())
-        {
-            for (int offset = 0; offset < text.length(); )
-            {
-                int codePoint = text.codePointAt(offset);
-                font.addToSubset(codePoint);
-                offset += Character.charCount(codePoint);
-            }
-        }
-
-        COSWriter.writeString(font.encode(text), getOutputStream());
     }
 
     /**
@@ -484,7 +403,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void drawXObject(PDXObject xobject, AffineTransform transform) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: drawXObject is not allowed within a text block.");
         }
@@ -498,7 +417,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
         {
             xObjectPrefix = "Form";
         }
-        COSName objMapping = getResources().add(xobject, xObjectPrefix);
+        COSName objMapping = resources.add(xobject, xObjectPrefix);
 
         saveGraphicsState();
         transform(new Matrix(transform));
@@ -537,50 +456,6 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     public void concatenate2CTM(AffineTransform at) throws IOException
     {
         transform(new Matrix(at));
-    }
-
-    /**
-     * q operator. Saves the current graphics state.
-     * @throws IOException If an error occurs while writing to the stream.
-     */
-    @Override
-    public void saveGraphicsState() throws IOException
-    {
-        if (!fontStack.isEmpty())
-        {
-            fontStack.push(fontStack.peek());
-        }
-        if (!strokingColorSpaceStack.isEmpty())
-        {
-            strokingColorSpaceStack.push(strokingColorSpaceStack.peek());
-        }
-        if (!nonStrokingColorSpaceStack.isEmpty())
-        {
-            nonStrokingColorSpaceStack.push(nonStrokingColorSpaceStack.peek());
-        }
-        writeOperator("q");
-    }
-
-    /**
-     * Q operator. Restores the current graphics state.
-     * @throws IOException If an error occurs while writing to the stream.
-     */
-    @Override
-    public void restoreGraphicsState() throws IOException
-    {
-        if (!fontStack.isEmpty())
-        {
-            fontStack.pop();
-        }
-        if (!strokingColorSpaceStack.isEmpty())
-        {
-            strokingColorSpaceStack.pop();
-        }
-        if (!nonStrokingColorSpaceStack.isEmpty())
-        {
-            nonStrokingColorSpaceStack.pop();
-        }
-        writeOperator("Q");
     }
 
     /**
@@ -737,7 +612,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void fillRect(float x, float y, float width, float height) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: fillRect is not allowed within a text block.");
         }
@@ -812,7 +687,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void addLine(float xStart, float yStart, float xEnd, float yEnd) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: addLine is not allowed within a text block.");
         }
@@ -835,7 +710,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void drawLine(float xStart, float yStart, float xEnd, float yEnd) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: drawLine is not allowed within a text block.");
         }
@@ -856,7 +731,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void addPolygon(float[] x, float[] y) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: addPolygon is not allowed within a text block.");
         }
@@ -889,7 +764,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void drawPolygon(float[] x, float[] y) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: drawPolygon is not allowed within a text block.");
         }
@@ -908,7 +783,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void fillPolygon(float[] x, float[] y) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: fillPolygon is not allowed within a text block.");
         }
@@ -963,7 +838,7 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     @Deprecated
     public void clipPath(int windingRule) throws IOException
     {
-        if (isInTextMode())
+        if (inTextMode)
         {
             throw new IllegalStateException("Error: clipPath is not allowed within a text block.");
         }
@@ -1099,31 +974,5 @@ public final class PDPageContentStream extends PDAbstractContentStream implement
     public void appendCOSName(COSName name) throws IOException
     {
         writeOperand(name);
-    }
-    
-    /**
-     * Set an extended graphics state.
-     * 
-     * @param state The extended graphics state.
-     * @throws IOException If the content stream could not be written.
-     */
-    @Override
-    public void setGraphicsStateParameters(PDExtendedGraphicsState state) throws IOException
-    {
-        writeOperand(getResources().add(state));
-        writeOperator("gs");
-    }
-
-    /**
-     * Set the text rendering mode. This determines whether showing text shall cause glyph outlines
-     * to be stroked, filled, used as a clipping boundary, or some combination of the three.
-     *
-     * @param rm The text rendering mode.
-     * @throws IOException If the content stream could not be written.
-     */
-    public void setRenderingMode(RenderingMode rm) throws IOException
-    {
-        writeOperand(rm.intValue());
-        writeOperator("Tr");
     }
 }

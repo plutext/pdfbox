@@ -990,7 +990,7 @@ public final class TTFSubsetter
      */
     public void writeToStream(OutputStream os) throws IOException
     {
-        if (glyphIds.isEmpty() || uniToGID.isEmpty())
+        if (glyphIds.isEmpty() && uniToGID.isEmpty())
         {
             LOG.info("font subset is empty");
         }
@@ -1128,4 +1128,10 @@ public final class TTFSubsetter
     {
         return (int)Math.round(Math.log(num) / Math.log(2));
     }
+
+    public void addGlyphIds(Set<Integer> allGlyphIds)
+    {
+        glyphIds.addAll(allGlyphIds);
+    }
+
 }
